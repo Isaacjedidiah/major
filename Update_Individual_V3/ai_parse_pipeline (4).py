@@ -380,6 +380,47 @@ def _index_ai_parse_elements(parsed_response, sub, search_store, entity_ref,
     return len(chunks)
 
 
+def _build_page_url_map(parsed, sharpen_dir=None):
+    """Build {page(1-based): page_image_url} so every metric from a page can be
+    stamped with the SAME page_url. Prefers ai_parse's pages[].image_uri; for the
+    sharpened path uses the known sharpened page images. Returns {} if none."""
+    import json as _json, os as _os
+    out = {}
+    # 1. sharpened path: deterministic page_<NNN>.png in the sharpen dir
+    if sharpen_dir:
+        try:
+            from .pdf_sharpen import iter_sharpened_pages, _vol
+            for _sd, _page, _img in iter_sharpened_pages(sharpen_dir):
+                out[_page] = _img            # already a Volume path, 1-based page
+            if out:
+                return out
+        except Exception:
+            pass
+    # 2. normal path: ai_parse pages[].image_uri, keyed by page_id (+1 -> 1-based)
+    try:
+        data = parsed
+        if type(parsed).__name__ == "VariantVal" or hasattr(parsed, "toJson"):
+            data = _json.loads(parsed.toJson())
+        elif isinstance(parsed, str):
+            data = _json.loads(parsed)
+        elif hasattr(parsed, "asDict"):
+            data = parsed.asDict(recursive=True)
+        doc = (data or {}).get("document", data) if isinstance(data, dict) else {}
+        pages = (data.get("pages") if isinstance(data, dict) else None) or \
+                (doc.get("pages") if isinstance(doc, dict) else None) or []
+        for pg in pages:
+            if isinstance(pg, dict):
+                pid = pg.get("id") if pg.get("id") is not None else pg.get("page_id")
+                uri = pg.get("image_uri")
+                if pid is not None and uri:
+                    u = uri.replace("dbfs:/Volumes", "/Volumes").replace("dbfs:", "/dbfs") \
+                        if isinstance(uri, str) else uri
+                    out[int(pid) + 1] = u     # ai_parse page_id is 0-based -> +1
+    except Exception:
+        pass
+    return out
+
+
 def run_ai_parse_batch(spark, submissions, storage, *, audit=None,
                        search_store=None, limit=None, use_sonnet=False,
                        llm_client=None, run_async_fn=None,
@@ -446,6 +487,7 @@ def run_ai_parse_batch(spark, submissions, storage, *, audit=None,
                 try:
                     dbutils.fs.mkdirs(_file_img_dir)
                     dbutils.fs.mkdirs(_file_crop_dir)
+                    dbutils.fs.mkdirs(_file_missed_dir)   # pre-create so misses land
                 except Exception:
                     pass
 
@@ -555,13 +597,19 @@ def run_ai_parse_batch(spark, submissions, storage, *, audit=None,
             entity_id = sub.get("entity_id") or ent["entity_id"]
             entity_name = sub.get("entity_name") or ent["entity_name"]
 
+            # page_url: one image url per page (SAME for every metric on a page)
+            _purl_map = _build_page_url_map(
+                parsed, sharpen_dir=(_sharp_dir if ("_sharp_dir" in dir()
+                                                    and _sharpen_on) else None))
+
             storage.write_silver(claims, team=sub["team"],
                                  report_type=sub["report_type"],
                                  report_date=rdate, entity_id=entity_id,
-                                 entity_name=entity_name)
+                                 entity_name=entity_name, page_url_map=_purl_map)
             result.gold_total += storage.write_gold_metrics(
                 clean, team=sub["team"], report_type=sub["report_type"],
-                report_date=rdate, entity_id=entity_id, entity_name=entity_name)
+                report_date=rdate, entity_id=entity_id, entity_name=entity_name,
+                page_url_map=_purl_map)
             if review:
                 storage.write_review_claims(
                     review, team=sub["team"], report_type=sub["report_type"],
