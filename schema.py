@@ -120,6 +120,7 @@ class Claim(BaseModel):
     as_at_date: Optional[str] = None
     confidence: float = 1.0
     source_element_id: str
+    element_id: Optional[str] = None     # ai_parse's own element id
     entity_ref: Optional[str] = None
     model_used: Optional[str] = None
     needs_review: bool = False
@@ -184,6 +185,8 @@ class GoldMetric(BaseModel):
     canonical_metric: str
     field_name: Optional[str] = None
     element_type: Optional[str] = None
+    element_id: Optional[str] = None     # ai_parse's element id (carried from Claim)
+    element_position: Optional[str] = None   # hash(doc_id|page|element_id)
     value: str
     # Parsed numeric form of `value` for dashboards/aggregation (None when the
     # value isn't numeric, e.g. "N/A"). The string `value` stays authoritative
@@ -200,6 +203,7 @@ class GoldMetric(BaseModel):
     source_document: Optional[str] = None
     page: Optional[int] = None
     unit: Optional[str] = None
+    currency: Optional[str] = None
     reporting_basis: Optional[str] = None
     scale: Optional[str] = None
     as_at_date: Optional[str] = None
