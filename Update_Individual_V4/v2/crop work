@@ -1,0 +1,49 @@
+                    # find the HIGHEST section_header above the figure that is
+                    # aligned with it and not separated by another chart/table. Then
+                    # extend the crop top to it -- the rectangle then includes any
+                    # text elements between the header and the figure (handles
+                    # <section_header><text><text><figure>).
+                    _header_top = None
+                    _header_lx = _header_rx = None
+                    for he in raw_elems:
+                        if str(he.get("type", "")).lower() not in _HEADER_TYPES:
+                            continue
+                        hb = he.get("bbox")
+                        if not hb or not isinstance(hb[0], dict) or hb[0].get("page_id") != page_id:
+                            continue
+                        hc = hb[0].get("coord")
+                        if not hc or len(hc) < 4:
+                            continue
+                        hx0, hy0, hx1, hy1 = hc
+                        if hy1 > fy0 + 2:
+                            continue                       # not above the chart
+                        if _block_y is not None and hy1 <= _block_y:
+                            continue                       # separated by another chart/table
+                        _ov = min(hx1, fx1) - max(hx0, fx0)
+                        if _ov < 0.25 * _fig_w:
+                            continue                       # not aligned with the chart
+                        # keep the HIGHEST (smallest y0) qualifying header
+                        if _header_top is None or hy0 < _header_top:
+                            _header_top = hy0; _header_lx = hx0; _header_rx = hx1
+                    if _header_top is not None:
+                        box["top"] = min(box["top"], _header_top)
+                        box["left"] = min(box["left"], _header_lx)
+                        box["right"] = max(box["right"], _header_rx)
+                        # also widen to any TEXT element sitting between the header
+                        # and the figure (so their left/right isn't clipped).
+                        for te in raw_elems:
+                            if str(te.get("type", "")).lower() not in ("text", "paragraph"):
+                                continue
+                            tb = te.get("bbox")
+                            if not tb or not isinstance(tb[0], dict) or tb[0].get("page_id") != page_id:
+                                continue
+                            tc = tb[0].get("coord")
+                            if not tc or len(tc) < 4:
+                                continue
+                            tx0, ty0, tx1, ty1 = tc
+                            # the text must sit in the band between header top and figure
+                            if ty0 >= _header_top and ty1 <= fy0 + 2:
+                                _tov = min(tx1, fx1) - max(tx0, fx0)
+                                if _tov >= 0.25 * _fig_w:
+                                    box["left"] = min(box["left"], tx0)
+                                    box["right"] = max(box["right"], tx1)
