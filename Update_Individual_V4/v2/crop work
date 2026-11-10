@@ -47,3 +47,50 @@
                                 if _tov >= 0.25 * _fig_w:
                                     box["left"] = min(box["left"], tx0)
                                     box["right"] = max(box["right"], tx1)
+
+
+# new cropping
+                if fig_idx is not None:
+                    _MAX_WORDS = int(globals().get("_CROP_MAX_TEXT_WORDS", 200))
+
+                    def _merge_box(e):
+                        eb = e.get("bbox")
+                        if not eb or not isinstance(eb[0], dict) or eb[0].get("page_id") != page_id:
+                            return False
+                        cc = eb[0].get("coord")
+                        if not cc or len(cc) < 4:
+                            return False
+                        cx0, cy0, cx1, cy1 = cc
+                        box["top"] = min(box["top"], cy0); box["bottom"] = max(box["bottom"], cy1)
+                        box["left"] = min(box["left"], cx0); box["right"] = max(box["right"], cx1)
+                        return True
+
+                    # climb UP: include section_headers + SHORT text, until we hit a
+                    # figure/table OR a long text block (>_MAX_WORDS). This captures
+                    # the chart's title block (header + any short text between) while
+                    # the figure/table boundary and the word cap prevent over-grabbing.
+                    i = fig_idx - 1
+                    while i >= 0:
+                        e = raw_elems[i]
+                        et = str(e.get("type", "")).lower()
+                        if et in ("figure", "table"):
+                            break                           # boundary -> stop
+                        if et in _HEADER_TYPES:
+                            _merge_box(e); i -= 1; continue   # header -> include, keep going
+                        if et in ("text", "paragraph"):
+                            _wc = len(str(e.get("content") or "").split())
+                            if _wc > _MAX_WORDS:
+                                break                       # big text block -> stop here
+                            _merge_box(e); i -= 1; continue   # short text -> include
+                        break                               # anything else -> stop
+
+                    # climb DOWN: legend/footnote below the chart, stop at figure/table.
+                    j = fig_idx + 1
+                    while j < len(raw_elems):
+                        e = raw_elems[j]
+                        et = str(e.get("type", "")).lower()
+                        if et in ("figure", "table"):
+                            break
+                        if et in _LEGEND_TYPES:
+                            _merge_box(e); j += 1; continue
+                        break
