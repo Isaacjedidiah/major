@@ -94,3 +94,56 @@
                         if et in _LEGEND_TYPES:
                             _merge_box(e); j += 1; continue
                         break
+
+
+# hybrid extraction update
+def _parse_points_from_resp(resp):
+    """Shared point-parsing used by both sync and async readers. IDENTICAL to the
+    original sync reader: prefer tool_arguments, else fall back to the purpose-built
+    parse_sonnet_chart_points (NOT a generic json parser) so charts whose result
+    comes via text are not dropped (and dates/fields are preserved)."""
+    ta = getattr(resp, "tool_arguments", None)
+    if isinstance(ta, dict):
+        for key in ("claims", "metrics", "points", "data", "values"):
+            if isinstance(ta.get(key), list):
+                return [p for p in ta[key] if isinstance(p, dict)]
+        if ta:
+            return [ta]
+    return parse_sonnet_chart_points(getattr(resp, "text", "") or "")
+
+# cropping improvement
+
+                        if et in _LEGEND_TYPES:
+                            _merge_box(e); j += 1; continue
+                        break
+
+                    # CLIP against every OTHER chart/table so the (possibly expanded)
+                    # crop never crosses into a neighbour -- critical on cramped pages
+                    # where a legend below could otherwise reach the next chart's title.
+                    for oe in raw_elems:
+                        if str(oe.get("type", "")).lower() not in ("figure", "table"):
+                            continue
+                        ob = oe.get("bbox")
+                        if not ob or not isinstance(ob[0], dict) or ob[0].get("page_id") != page_id:
+                            continue
+                        oc = ob[0].get("coord")
+                        if not oc or len(oc) < 4 or oc == coord:
+                            continue
+                        ox0, oy0, ox1, oy1 = oc
+                        _h = not (ox1 < fx0 or ox0 > fx1)   # horizontally overlaps this chart
+                        _v = not (oy1 < fy0 or oy0 > fy1)   # vertically overlaps this chart
+                        # a chart/table ABOVE (and horizontally overlapping) -> clip top
+                        if oy1 <= fy0 and _h:
+                            box["top"] = max(box["top"], oy1 + 1)
+                        # BELOW -> clip bottom (stops reaching the next chart's title)
+                        if oy0 >= fy1 and _h:
+                            box["bottom"] = min(box["bottom"], oy0 - 1)
+                        # LEFT -> clip left
+                        if ox1 <= fx0 and _v:
+                            box["left"] = max(box["left"], ox1 + 1)
+                        # RIGHT -> clip right
+                        if ox0 >= fx1 and _v:
+                            box["right"] = min(box["right"], ox0 - 1)
+                    left, top = box["left"], box["top"]
+                    right, bottom = box["right"], box["bottom"]
+                x0, y0 = max(0, int(left)), max(0, int(top))
